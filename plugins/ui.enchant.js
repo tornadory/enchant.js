@@ -179,3 +179,13 @@ enchant.ui.APad = enchant.Class.create(enchant.Group, {
 		this.dist = dist;
 	}
 });
+
+// cross-frame keyevent propagation
+document.addEventListener('message', function(msg){
+	try{
+		var data = JSON.parse(msg.data) 
+		if(data && data.type == 'event'){
+			enchant.Game.instance.dispatchEvent(data.value);
+		}
+	}catch(e){}
+});
