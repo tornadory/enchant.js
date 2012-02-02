@@ -1,5 +1,5 @@
 /**
- * enchant.js v0.4.1
+ * enchant.js v0.4.3
  *
  * Copyright (c) Ubiquitous Entertainment Inc.
  * Dual licensed under the MIT or GPL Version 3 licenses
@@ -223,6 +223,7 @@ enchant.Class.create = function(superclass, definition) {
             superclass.apply(this, arguments);
         };
     }
+
     return constructor;
 };
 
@@ -512,6 +513,7 @@ enchant.EventTarget = enchant.Class.create({
             this._listeners[type] = [listener];
         } else if (listeners.indexOf(listener) == -1) {
             listeners.unshift(listener);
+            
         }
     },
     /**
@@ -526,6 +528,17 @@ enchant.EventTarget = enchant.Class.create({
             if (i != -1) {
                 listeners.splice(i, 1);
             }
+        }
+    },
+    /**
+     * すべてのイベントリスナを削除する.
+     * @param {String} type イベントのタイプ.
+     */
+    clearEventListener: function(type) {
+        if(type != null){
+            delete this._listeners[type];
+        }else{
+            this._listeners = {};
         }
     },
     /**
@@ -858,8 +871,8 @@ enchant.Game = enchant.Class.create(enchant.EventTarget, {
                 req.open('GET', src, true);
                 req.onreadystatechange = function(e) {
                     if (req.readyState == 4) {
-                        if (req.status != 200) {
-                            throw new Error('Cannot load an asset: ' + src);
+                        if (req.status != 200 && req.status != 0) {
+                            throw new Error(req.status + ': ' + 'Cannot load an asset: ' + src);
                         }
 
                         var type = req.getResponseHeader('Content-Type') || '';
@@ -870,7 +883,7 @@ enchant.Game = enchant.Class.create(enchant.EventTarget, {
                             game.assets[src] = enchant.Sound.load(src, type);
                             game.assets[src].addEventListener('load', callback);
                         } else {
-                            game.assets[asset] = req.responseText;
+                            game.assets[src] = req.responseText;
                             callback();
                         }
                     }
@@ -891,12 +904,12 @@ enchant.Game = enchant.Class.create(enchant.EventTarget, {
         } else if (this._assets.length) {
             if (enchant.Sound.enabledInMobileSafari && !game._touched &&
                 VENDER_PREFIX == 'webkit' && TOUCH_ENABLED) {
-                var scene = new Scene();
+                var scene = new enchant.Scene();
                 scene.backgroundColor = '#000';
                 var size = Math.round(game.width / 10);
-                var sprite = new Sprite(game.width, size);
+                var sprite = new enchant.Sprite(game.width, size);
                 sprite.y = (game.height - size) / 2;
-                sprite.image = new Surface(game.width, size);
+                sprite.image = new enchant.Surface(game.width, size);
                 sprite.image.context.fillStyle = '#fff';
                 sprite.image.context.font = (size-1) + 'px bold Helvetica,Arial,sans-serif';
                 var width = sprite.image.context.measureText('Touch to Start').width;
@@ -938,6 +951,23 @@ enchant.Game = enchant.Class.create(enchant.EventTarget, {
         }, 1000 / this.fps);
         this.running = true;
     },
+    /**
+     * ゲームをデバッグモードで開始する.
+     *
+     * enchant.Game.instance._debug フラグを true にすることでもデバッグモードをオンにすることができる
+     */
+    debug: function() {
+        this._debug = true;
+        this.rootScene.addEventListener("enterframe", function(time){
+            this._actualFps = (1 / time);
+        })
+        this.start();
+    },
+    actualFps: {
+        get: function(){
+            return this._actualFps || this.fps;
+        }
+    },
     _tick: function() {
         var now = Date.now();
         var e = new enchant.Event('enterframe');
@@ -949,6 +979,7 @@ enchant.Game = enchant.Class.create(enchant.EventTarget, {
         while (nodes.length) {
             var node = nodes.pop();
             node.dispatchEvent(e);
+            node.age ++;
             if (node.childNodes) {
                 push.apply(nodes, node.childNodes);
             }
@@ -985,6 +1016,17 @@ enchant.Game = enchant.Class.create(enchant.EventTarget, {
             this._intervalID = null;
         }
     },
+    /**
+     * ゲームを再開する。
+     */
+    resume: function() {
+        this.currentTime = Date.now();
+        this._intervalID = window.setInterval(function() {
+            game._tick()
+        }, 1000 / this.fps);
+        this.running = true;
+    },
+        
     /**
      * 新しいSceneに移行する.
      *
@@ -1092,6 +1134,8 @@ enchant.Node = enchant.Class.create(enchant.EventTarget, {
         this._offsetX = 0;
         this._offsetY = 0;
 
+        this.age = 0;
+
         /**
          * Nodeの親Node.
          * @type {enchant.Group}
@@ -1173,6 +1217,14 @@ enchant.Node = enchant.Class.create(enchant.EventTarget, {
             this._offsetX = this._x;
             this._offsetY = this._y;
         }
+    },
+    remove: function(){
+        if(this._listener){
+            this.clearEventListener();
+        }
+        if(this.parentNode){
+            this.removeChild(this);
+        }
     }
 });
 
@@ -1199,6 +1251,11 @@ enchant.Entity = enchant.Class.create(enchant.Node, {
         this._visible = true;
         this._buttonMode = null;
 
+        if(enchant.Game.instance._debug){
+            this._style.border = "1px solid blue";
+            this._style.margin = "-1px";
+        }
+
         /**
          * Entityにボタンの機能を設定する.
          * Entityに対するタッチ, クリックをleft, right, up, down, a, bいずれかの
@@ -1215,14 +1272,14 @@ enchant.Entity = enchant.Class.create(enchant.Node, {
         this.addEventListener('touchstart', function() {
             if (!this.buttonMode) return;
             this.buttonPressed = true;
-            var e = new Event(button + 'buttondown');
+            var e = new enchant.Event(this.buttonMode + 'buttondown');
             this.dispatchEvent(e);
             game.dispatchEvent(e);
         });
         this.addEventListener('touchend', function() {
             if (!this.buttonMode) return;
             this.buttonPressed = false;
-            var e = new Event(button + 'buttonup');
+            var e = new enchant.Event(this.buttonMode + 'buttonup');
             this.dispatchEvent(e);
             game.dispatchEvent(e);
         });
@@ -1479,6 +1536,14 @@ enchant.Sprite = enchant.Class.create(enchant.Entity, {
                 this._dirty = false;
             }
         });
+        
+        if(enchant.Game.instance._debug){
+            this._style.border = "1px solid red";
+            this._style.margin = "-1px";
+            this.addEventListener("touchstart", function(){
+                if(!enchant.Game.instance.running) console.log("touchstart", this);
+            });
+        }
     },
     /**
      * Spriteで表示する画像.
@@ -1527,8 +1592,8 @@ enchant.Sprite = enchant.Class.create(enchant.Entity, {
                     this._element.appendChild(image._element);
                 }
             }
-
             this._image = image;
+            this.frame = this.frame;
        }
     },
     /**
@@ -1543,16 +1608,18 @@ enchant.Sprite = enchant.Class.create(enchant.Entity, {
         },
         set: function(frame) {
             this._frame = frame;
-            var row = this._image.width / this._width | 0;
-            if (this._image._css) {
-                this._style.backgroundPosition = [
-                    -(frame % row) * this._width, 'px ',
-                    -(frame / row | 0) * this._height, 'px'
-                ].join('');
-            } else if (this._element.firstChild) {
-                var style = this._element.firstChild.style;
-                style.left = -(frame % row) * this._width + 'px';
-                style.top = -(frame / row | 0) * this._height + 'px';
+            if (this._image != null){
+                var row = this._image.width / this._width | 0;
+                if (this._image._css) {
+                    this._style.backgroundPosition = [
+                        -(frame % row) * this._width, 'px ',
+                        -(frame / row | 0) * this._height, 'px'
+                    ].join('');
+                } else if (this._element.firstChild) {
+                    var style = this._element.firstChild.style;
+                    style.left = -(frame % row) * this._width + 'px';
+                    style.top = -(frame / row | 0) * this._height + 'px';
+                }
             }
         }
     },
@@ -1863,7 +1930,7 @@ enchant.Map = enchant.Class.create(enchant.Entity, {
         set: function(image) {
             this._image = image;
             if (RETINA_DISPLAY && game.scale == 2) {
-                var img = new Surface(image.width * 2, image.height * 2);
+                var img = new enchant.Surface(image.width * 2, image.height * 2);
                 var tileWidth = this._tileWidth || image.width;
                 var tileHeight = this._tileHeight || image.height;
                 var row = image.width / tileWidth | 0;
@@ -2665,6 +2732,30 @@ enchant.Sound.load = function(src, type) {
     return sound;
 };
 
-enchant.Sound.enabledInMobileSafari = false;
+window.addEventListener("message", function(msg, origin){
+    var data = JSON.parse(msg.data);
+    if (data.type == "event") {
+		game.dispatchEvent(new Event(data.value));
+    }else if (data.type == "debug"){
+        switch(data.value) {
+            case "start":
+                enchant.Game.instance.start();
+                break;
+            case "pause":
+                enchant.Game.instance.pause();
+                break;
+            case "resume":
+                enchant.Game.instance.resume();
+                break;
+            case "tick":
+                enchant.Game.instance._tick();
+                break;
+            default:
+                break;
+        }
+            
+    }
+}, false);
 
+enchant.Sound.enabledInMobileSafari = false;
 })();
