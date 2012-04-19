@@ -2990,7 +2990,26 @@ enchant.Map = enchant.Class.create(enchant.Entity, {
                 }
             }
         }
-    }
+    },
+    /**
+     * 指定した座標・レイヤーにあるタイルの種類を取得する
+     * @param x
+     * @param y
+     * @param layer
+     */
+  checkTile: function(x, y,layer) {
+        if (x < 0 || this.width <= x || y < 0 || this.height <= y) {
+            return false;
+        }
+        var width = this._image.width;
+        var height = this._image.height;
+        var tileWidth = this._tileWidth || width;
+        var tileHeight = this._tileHeight || height;
+        x = x / tileWidth | 0;
+        y = y / tileHeight | 0;
+        var data = this._data[layer];
+        return data[y][x];
+    },
 });
 
 /**
